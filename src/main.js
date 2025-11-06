@@ -75,9 +75,11 @@ ground.position.y = 0
 ground.receiveShadow = true
 scene.add(ground)
 
-// Loaders with predefined public paths (accounting for Vite base path)
-const gltfLoader = new GLTFLoader().setPath('/modelhair/models/')
-const textureLoader = new THREE.TextureLoader().setPath('/modelhair/textures/')
+// Loaders with predefined public paths (using Vite's base URL for correct paths in dev and production)
+const baseUrl = import.meta.env.BASE_URL
+console.log('Base URL:', baseUrl) // Debug: check what base URL is being used
+const gltfLoader = new GLTFLoader().setPath(`${baseUrl}models/`)
+const textureLoader = new THREE.TextureLoader().setPath(`${baseUrl}textures/`)
 
 // Utility: center and frame the loaded model in view
 function frameObject(object3d) {
