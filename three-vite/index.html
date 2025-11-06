@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Three.js + Vite</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud" style="position:fixed;left:12px;top:12px;background:rgba(0,0,0,.55);color:#fff;padding:10px 12px;border-radius:8px;font:12px/1.4 -apple-system,system-ui,Segoe UI,Arial">
+      <div style="font-weight:600;margin-bottom:6px">Three.js Viewer</div>
+      <div>Place your GLB in <code>/public/models</code>.</div>
+      <div>Open with <code>?model=MyModel.glb</code>.</div>
+      <div style="margin-top:6px">Camera: drag = orbit, wheel/pinch = zoom, right-drag = pan</div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
