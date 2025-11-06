@@ -47,6 +47,13 @@ sun.castShadow = true
 sun.shadow.mapSize.set(2048, 2048)
 sun.shadow.normalBias = 0.02
 sun.shadow.bias = -0.0005
+// Configure shadow camera to cover a large area
+sun.shadow.camera.left = -50
+sun.shadow.camera.right = 50
+sun.shadow.camera.top = 50
+sun.shadow.camera.bottom = -50
+sun.shadow.camera.near = 0.1
+sun.shadow.camera.far = 200
 scene.add(sun)
 scene.add(sun.target)
 
@@ -68,9 +75,9 @@ ground.position.y = 0
 ground.receiveShadow = true
 scene.add(ground)
 
-// Loaders with predefined public paths
-const gltfLoader = new GLTFLoader().setPath('/models/')
-const textureLoader = new THREE.TextureLoader().setPath('/textures/')
+// Loaders with predefined public paths (accounting for Vite base path)
+const gltfLoader = new GLTFLoader().setPath('/modelhair/models/')
+const textureLoader = new THREE.TextureLoader().setPath('/modelhair/textures/')
 
 // Utility: center and frame the loaded model in view
 function frameObject(object3d) {
@@ -99,9 +106,11 @@ function loadModelFromPublic() {
   const params = new URLSearchParams(window.location.search)
   const modelFile = params.get('model') || 'airwarp_body_01.glb' // default model filename
 
+  console.log('Loading model:', modelFile)
   gltfLoader.load(
     modelFile,
     (gltf) => {
+      console.log('Model loaded successfully:', gltf)
       // Remove previous model if any
       const existing = scene.getObjectByName('LoadedModelRoot')
       if (existing) scene.remove(existing)
@@ -109,15 +118,30 @@ function loadModelFromPublic() {
       const root = gltf.scene
       root.name = 'LoadedModelRoot'
       // Enable shadows on meshes
+      let meshCount = 0
       root.traverse((obj) => {
         if (obj.isMesh) {
           obj.castShadow = true
           obj.receiveShadow = true
+          meshCount++
         }
       })
+      console.log(`Found ${meshCount} meshes in model`)
       scene.add(root)
 
       frameObject(root)
+      console.log('Model added to scene and framed')
+      
+      // Update shadow camera to cover the model
+      const modelBox = new THREE.Box3().setFromObject(root)
+      const modelSize = modelBox.getSize(new THREE.Vector3())
+      const maxSize = Math.max(modelSize.x, modelSize.y, modelSize.z)
+      const shadowSize = maxSize * 2
+      sun.shadow.camera.left = -shadowSize
+      sun.shadow.camera.right = shadowSize
+      sun.shadow.camera.top = shadowSize
+      sun.shadow.camera.bottom = -shadowSize
+      sun.shadow.camera.updateProjectionMatrix()
 
       // Optional: apply a texture to the first Mesh if a ?texture= file is provided
       const textureName = params.get('texture')
@@ -137,10 +161,13 @@ function loadModelFromPublic() {
         })
       }
     },
-    undefined,
+    (progress) => {
+      console.log('Loading progress:', (progress.loaded / progress.total * 100) + '%')
+    },
     (err) => {
       // If the file isn't found, keep the scene running and log to console
-      console.warn('Could not load GLB from /public/models. Ensure the file exists and the name is correct.', err)
+      console.error('Could not load GLB from /models/. Ensure the file exists and the name is correct.', err)
+      console.error('Attempted to load:', modelFile)
     }
   )
 }
