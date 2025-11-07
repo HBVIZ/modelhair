@@ -5,7 +5,7 @@ html, body {
 body {
   margin: 0;
   overflow: hidden;
-  background: #111111;
+  background: transparent;
   color: #e5e7eb;
 }
 
