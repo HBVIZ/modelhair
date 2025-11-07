@@ -1,9 +1,8 @@
-// vite.config.js - change to:
 import { defineConfig } from 'vite'
 
 export default defineConfig({
-  base: '/', // Root path for Netlify
+  base: '/', // For Netlify
   build: {
-    outDir: 'docs'
+    outDir: 'dist' // Standard Vite output
   }
 })
