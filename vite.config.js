@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite'
 
 export default defineConfig({
-  base: '/', // For Netlify
+  base: '/modelhair/', // For Netlify
   build: {
-    outDir: 'dist' // Standard Vite output
+    outDir: 'docs' // Standard Vite output
   }
 })
