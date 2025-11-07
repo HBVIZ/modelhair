@@ -5,6 +5,8 @@ import './style.css'
 import * as THREE from 'three' // Three.js library for 3D graphics
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js' // Camera controls (drag to rotate)
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js' // Loads .glb model files
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js' // Loads HDR environment maps
+import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import { GUI } from 'lil-gui' // Creates the control panel on the right side
 
 // ============================================================================
@@ -36,6 +38,8 @@ renderer.setSize(window.innerWidth, window.innerHeight) // Match window size
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)) // High DPI support
 renderer.shadowMap.enabled = true // Enable shadows
 renderer.setClearColor(0x000000, 0) // Transparent clear color
+renderer.toneMapping = THREE.ACESFilmicToneMapping // Better tonemapping for HDR
+renderer.toneMappingExposure = 1.0 // Overall brightness multiplier
 container.appendChild(renderer.domElement) // Add canvas to page
 renderer.domElement.addEventListener('pointerdown', onPointerDown)
 renderer.domElement.addEventListener('pointermove', onPointerMove)
@@ -87,6 +91,24 @@ const sunHelper = new THREE.DirectionalLightHelper(sun, 0.5, 0xffcc66)
 sunHelper.visible = true // Toggle in GUI to show/hide
 scene.add(sunHelper)
 
+// Rect area lights for soft, diffused fill (arranged around model)
+RectAreaLightUniformsLib.init()
+const areaLights = []
+const areaLightSettings = [
+  { position: new THREE.Vector3(-4, 3, 2), rotation: new THREE.Euler(0, Math.PI / 4, 0) },
+  { position: new THREE.Vector3(4, 3, 2), rotation: new THREE.Euler(0, -Math.PI / 4, 0) },
+  { position: new THREE.Vector3(0, 5, -3), rotation: new THREE.Euler(-Math.PI / 6, 0, 0) },
+]
+
+areaLightSettings.forEach(({ position, rotation }) => {
+  const rectLight = new THREE.RectAreaLight(0xffffff, 3.5, 6, 8) // color, intensity, width, height
+  rectLight.position.copy(position)
+  rectLight.rotation.copy(rotation)
+  rectLight.lookAt(0, 0, 0)
+  scene.add(rectLight)
+  areaLights.push(rectLight)
+})
+
 // ============================================================================
 // FILE LOADERS - Load models and textures from the public folder
 // ============================================================================
@@ -96,16 +118,171 @@ console.log('Base URL:', baseUrl) // Debug: check what base URL is being used
 // Set up loaders to look in the public/models and public/textures folders
 const gltfLoader = new GLTFLoader().setPath(`${baseUrl}models/`)
 const textureLoader = new THREE.TextureLoader().setPath(`${baseUrl}textures/`)
+const rgbeLoader = new RGBELoader().setPath(`${baseUrl}environments/`)
 
 // Variables to store GUI controls (will be set up later)
 let modelFolder = null // The "Model" folder in the control panel
 let updateCameraGUI = () => {} // Function to update camera controls (defined later)
 let currentModel = null // Reference to the currently loaded model (used for rotation)
+let currentEnvironment = null // Cache current HDR texture so it can be disposed
 
 // Pointer drag state for rotating the model
 let isPointerDown = false
 const pointerPosition = { x: 0, y: 0 }
 const dragRotationSpeed = 0.005 // Change this number to rotate faster/slower
+
+// Rotation snap configuration - adjust these numbers to change behaviour
+const snapRotationSettings = {
+  enabled: true, // Turn snapping on or off
+  axis: 'x', // Axis to watch (x = pitch)
+  clampDeg: { min: -45, max: 110 }, // Limit how far the model can tilt (degrees)
+  thresholds: [
+    {
+      when: 'greater', // When rotation is greater than threshold
+      thresholdDeg: 25, // If tilted forward more than 25°
+      snapDeg: 90, // Snap to 90° (looking straight down)
+    },
+    {
+      when: 'less', // When rotation is less than threshold
+      thresholdDeg: 5, // If tilt returns under 5°
+      snapDeg: 0, // Snap back upright
+    },
+  ],
+}
+
+const snapRotationState = {
+  active: false,
+  axis: 'x',
+  target: 0,
+  speed: 0.15, // 0.0-1.0 smoothing factor (higher = faster snap)
+  epsilon: THREE.MathUtils.degToRad(0.5), // Close enough angle to stop snapping
+}
+
+const modelIntroState = {
+  fade: {
+    active: false,
+    start: 0,
+    duration: 1.5,
+    materials: [],
+  },
+  spin: {
+    active: false,
+    start: 0,
+    duration: 3.0,
+    from: 0,
+    to: Math.PI * 2,
+  },
+}
+
+function applyRotationSnap() {
+  if (!snapRotationSettings.enabled || !currentModel) return
+
+  const axis = snapRotationSettings.axis
+  const value = currentModel.rotation[axis]
+
+  for (const rule of snapRotationSettings.thresholds) {
+    const thresholdRad = THREE.MathUtils.degToRad(rule.thresholdDeg)
+    const snapRad = THREE.MathUtils.degToRad(rule.snapDeg)
+
+    if (rule.when === 'greater' && value >= thresholdRad) {
+      snapRotationState.active = true
+      snapRotationState.axis = axis
+      snapRotationState.target = snapRad
+      return
+    }
+
+    if (rule.when === 'less' && value <= thresholdRad) {
+      snapRotationState.active = true
+      snapRotationState.axis = axis
+      snapRotationState.target = snapRad
+      return
+    }
+
+    if (!rule.when || rule.when === 'close') {
+      if (Math.abs(value - snapRad) <= thresholdRad) {
+        snapRotationState.active = true
+        snapRotationState.axis = axis
+        snapRotationState.target = snapRad
+        return
+      }
+    }
+  }
+
+  // If no rule matched, ensure snapping is disabled
+  snapRotationState.active = false
+}
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
+
+function startModelIntroAnimation(root) {
+  const now = performance.now() / 1000
+
+  const materials = new Set()
+  root.traverse((obj) => {
+    if (obj.isMesh && obj.material) {
+      if (Array.isArray(obj.material)) {
+        obj.material.forEach((mat) => materials.add(mat))
+      } else {
+        materials.add(obj.material)
+      }
+    }
+  })
+
+  materials.forEach((mat) => {
+    mat.transparent = true
+    mat.opacity = 0
+    mat.needsUpdate = true
+  })
+
+  modelIntroState.fade.active = true
+  modelIntroState.fade.start = now
+  modelIntroState.fade.materials = Array.from(materials)
+
+  modelIntroState.spin.active = true
+  modelIntroState.spin.start = now
+  modelIntroState.spin.from = 0
+  modelIntroState.spin.to = Math.PI * 2
+}
+
+function updateModelAnimations() {
+  if (!currentModel) return
+
+  const now = performance.now() / 1000
+
+  if (modelIntroState.fade.active) {
+    const elapsed = now - modelIntroState.fade.start
+    const t = THREE.MathUtils.clamp(elapsed / modelIntroState.fade.duration, 0, 1)
+    const eased = easeInOutCubic(t)
+    modelIntroState.fade.materials.forEach((mat) => {
+      mat.opacity = eased
+      mat.needsUpdate = true
+      if (eased >= 1 && mat.opacity > 1) mat.opacity = 1
+    })
+    if (t >= 1) {
+      modelIntroState.fade.active = false
+      modelIntroState.fade.materials.forEach((mat) => {
+        mat.opacity = 1
+        mat.needsUpdate = true
+        if (mat.transparent === true) {
+          mat.transparent = true // Keep transparency enabled for potential future fades
+        }
+      })
+    }
+  }
+
+  if (modelIntroState.spin.active) {
+    const elapsed = now - modelIntroState.spin.start
+    const t = THREE.MathUtils.clamp(elapsed / modelIntroState.spin.duration, 0, 1)
+    const eased = easeInOutCubic(t)
+    currentModel.rotation.y = modelIntroState.spin.from + (modelIntroState.spin.to - modelIntroState.spin.from) * eased
+    if (t >= 1) {
+      modelIntroState.spin.active = false
+      currentModel.rotation.y = modelIntroState.spin.to
+    }
+  }
+}
 
 // ============================================================================
 // MODEL ROTATION WITH POINTER - Drag to rotate the model while camera stays put
@@ -113,6 +290,7 @@ const dragRotationSpeed = 0.005 // Change this number to rotate faster/slower
 function onPointerDown(event) {
   if (!currentModel) return
   isPointerDown = true
+  snapRotationState.active = false // Stop any ongoing snap when user drags
   pointerPosition.x = event.clientX
   pointerPosition.y = event.clientY
   renderer.domElement.setPointerCapture(event.pointerId)
@@ -124,12 +302,21 @@ function onPointerMove(event) {
   const deltaY = event.clientY - pointerPosition.y
   currentModel.rotation.y += deltaX * dragRotationSpeed // Horizontal drag -> Y rotation
   currentModel.rotation.x += deltaY * dragRotationSpeed // Vertical drag -> X rotation
+
+  // Clamp rotation limits so the model doesn't flip over
+  if (snapRotationSettings.clampDeg) {
+    const minRad = THREE.MathUtils.degToRad(snapRotationSettings.clampDeg.min)
+    const maxRad = THREE.MathUtils.degToRad(snapRotationSettings.clampDeg.max)
+    currentModel.rotation.x = THREE.MathUtils.clamp(currentModel.rotation.x, minRad, maxRad)
+  }
+
   pointerPosition.x = event.clientX
   pointerPosition.y = event.clientY
 }
 
 function onPointerUp(event) {
   isPointerDown = false
+  applyRotationSnap()
   try {
     renderer.domElement.releasePointerCapture(event.pointerId)
   } catch (e) {
@@ -139,6 +326,52 @@ function onPointerUp(event) {
 
 function onPointerLeave() {
   isPointerDown = false
+  applyRotationSnap()
+}
+
+function updateSnapRotation() {
+  if (!snapRotationState.active || !currentModel) return
+
+  const axis = snapRotationState.axis
+  const current = currentModel.rotation[axis]
+  const target = snapRotationState.target
+  const delta = target - current
+
+  if (Math.abs(delta) <= snapRotationState.epsilon) {
+    currentModel.rotation[axis] = target
+    snapRotationState.active = false
+    return
+  }
+
+  currentModel.rotation[axis] = current + delta * snapRotationState.speed
+
+  if (snapRotationSettings.clampDeg) {
+    const minRad = THREE.MathUtils.degToRad(snapRotationSettings.clampDeg.min)
+    const maxRad = THREE.MathUtils.degToRad(snapRotationSettings.clampDeg.max)
+    currentModel.rotation[axis] = THREE.MathUtils.clamp(currentModel.rotation[axis], minRad, maxRad)
+  }
+}
+
+// ============================================================================
+// ENVIRONMENT MAP - Load HDR background lighting (keeps background transparent)
+// ============================================================================
+function loadEnvironmentMap(hdrFile = 'park_music_stage_4k.hdr') {
+  rgbeLoader.load(
+    hdrFile,
+    (texture) => {
+      if (currentEnvironment) {
+        currentEnvironment.dispose()
+      }
+      texture.mapping = THREE.EquirectangularReflectionMapping
+      scene.environment = texture // Use HDR for reflections and lighting
+      currentEnvironment = texture
+      console.log('HDR environment loaded:', hdrFile)
+    },
+    undefined,
+    (error) => {
+      console.error('Failed to load HDR environment:', hdrFile, error)
+    }
+  )
 }
 
 // ============================================================================
@@ -182,7 +415,7 @@ function loadModelFromPublic() {
   const modelFile = params.get('model') || 'airwarp_body_01.glb' // Change this to your default model
 
   console.log('Loading model:', modelFile)
-  
+
   // Load the model file
   gltfLoader.load(
     modelFile, // File to load
@@ -193,18 +426,22 @@ function loadModelFromPublic() {
       // Remove any previous model from the scene
       const existing = scene.getObjectByName('LoadedModelRoot')
       if (existing) scene.remove(existing)
-      
+
       // Remove old GUI controls
       if (modelFolder) {
         modelFolder.destroy()
         modelFolder = null
       }
       currentModel = null
+      modelIntroState.fade.active = false
+      modelIntroState.fade.materials = []
+      modelIntroState.spin.active = false
 
       // Get the model from the loaded file
       const root = gltf.scene
       root.name = 'LoadedModelRoot' // Give it a name so we can find it later
       root.scale.setScalar(1) // Start at normal size (scale = 1)
+      root.rotation.set(0, 0, 0) // Reset rotation when loading a new model
       currentModel = root // Store reference so we can rotate it with the pointer
       
       // Enable shadows on all meshes in the model
@@ -227,6 +464,7 @@ function loadModelFromPublic() {
       
       // Create the GUI controls for this model
       setupModelControls(root)
+      startModelIntroAnimation(root)
       
       // Update shadow camera to cover the model size
       const modelBox = new THREE.Box3().setFromObject(root)
@@ -497,6 +735,9 @@ updateCameraGUI = () => {
 //   })
 // ============================================================================
 
+// Load HDR environment lighting once
+loadEnvironmentMap()
+
 // ============================================================================
 // START THE APP
 // ============================================================================
@@ -516,6 +757,8 @@ window.addEventListener('resize', onWindowResize)
 // ============================================================================
 function animate() {
   controls.update() // Update camera controls (for smooth damping)
+  updateSnapRotation()
+  updateModelAnimations()
   renderer.render(scene, camera) // Draw everything to the screen
   requestAnimationFrame(animate) // Run again on next frame (60fps)
 }
