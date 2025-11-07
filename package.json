@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:github": "VITE_BASE_PATH=/modelhair/ VITE_OUT_DIR=docs vite build",
+    "build:netlify": "VITE_BASE_PATH=/ VITE_OUT_DIR=dist vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
