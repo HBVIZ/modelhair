@@ -15,12 +15,5 @@
   },
   "dependencies": {
     "three": "^0.181.0"
-  },
-  "main": "vite.config.js",
-  "directories": {
-    "doc": "docs"
-  },
-  "author": "",
-  "license": "ISC",
-  "description": ""
+  }
 }
