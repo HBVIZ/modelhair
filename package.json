@@ -14,7 +14,13 @@
     "vite": "^7.1.7"
   },
   "dependencies": {
-    "lil-gui": "^0.21.0",
     "three": "^0.181.0"
-  }
+  },
+  "main": "vite.config.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": ""
 }

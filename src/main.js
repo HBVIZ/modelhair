@@ -7,7 +7,6 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js' // 
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js' // Loads .glb model files
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js' // Loads HDR environment maps
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
-import { GUI } from 'lil-gui' // Creates the control panel on the right side
 
 // ============================================================================
 // SETUP - Basic scene, camera, and renderer
@@ -120,9 +119,6 @@ const gltfLoader = new GLTFLoader().setPath(`${baseUrl}models/`)
 const textureLoader = new THREE.TextureLoader().setPath(`${baseUrl}textures/`)
 const rgbeLoader = new RGBELoader().setPath(`${baseUrl}environments/`)
 
-// Variables to store GUI controls (will be set up later)
-let modelFolder = null // The "Model" folder in the control panel
-let updateCameraGUI = () => {} // Function to update camera controls (defined later)
 let currentModel = null // Reference to the currently loaded model (used for rotation)
 let currentEnvironment = null // Cache current HDR texture so it can be disposed
 
@@ -172,6 +168,13 @@ const modelIntroState = {
     from: 0,
     to: Math.PI * 2,
   },
+  tilt: {
+    active: false,
+    start: 0,
+    duration: 1.5,
+    from: 0,
+    to: 0,
+  },
 }
 
 function applyRotationSnap() {
@@ -216,6 +219,44 @@ function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
 
+// Helper to animate yaw (Y axis) rotation. Increase `amount` for larger turns.
+// Positive = turn right (clockwise), negative = turn left.
+function startSpin(amount = Math.PI * 2, duration = 3, resetToZero = false) {
+  if (!currentModel) return
+  const now = performance.now() / 1000
+  modelIntroState.spin.active = true
+  modelIntroState.spin.start = now
+  modelIntroState.spin.duration = duration
+  if (resetToZero) {
+    currentModel.rotation.y = 0
+    modelIntroState.spin.from = 0
+    modelIntroState.spin.to = amount
+  } else {
+    modelIntroState.spin.from = currentModel.rotation.y
+    modelIntroState.spin.to = currentModel.rotation.y + amount
+  }
+}
+
+// Helper to animate pitch (X axis) rotation. Pass degrees (positive = forward tilt).
+// Values are clamped to `snapRotationSettings.clampDeg` so the model never exceeds your limits.
+function startTilt(targetDegrees, duration = 1.2) {
+  if (!currentModel) return
+  const now = performance.now() / 1000
+  const targetRadians = THREE.MathUtils.degToRad(targetDegrees)
+  const { min, max } = snapRotationSettings.clampDeg || { min: -90, max: 90 }
+  const clampedTarget = THREE.MathUtils.clamp(
+    targetRadians,
+    THREE.MathUtils.degToRad(min),
+    THREE.MathUtils.degToRad(max)
+  )
+
+  modelIntroState.tilt.active = true
+  modelIntroState.tilt.start = now
+  modelIntroState.tilt.duration = duration
+  modelIntroState.tilt.from = currentModel.rotation.x
+  modelIntroState.tilt.to = clampedTarget
+}
+
 function startModelIntroAnimation(root) {
   const now = performance.now() / 1000
 
@@ -240,10 +281,7 @@ function startModelIntroAnimation(root) {
   modelIntroState.fade.start = now
   modelIntroState.fade.materials = Array.from(materials)
 
-  modelIntroState.spin.active = true
-  modelIntroState.spin.start = now
-  modelIntroState.spin.from = 0
-  modelIntroState.spin.to = Math.PI * 2
+  startSpin(Math.PI * 2, 3, true)
 }
 
 function updateModelAnimations() {
@@ -280,6 +318,17 @@ function updateModelAnimations() {
     if (t >= 1) {
       modelIntroState.spin.active = false
       currentModel.rotation.y = modelIntroState.spin.to
+    }
+  }
+
+  if (modelIntroState.tilt.active) {
+    const elapsed = now - modelIntroState.tilt.start
+    const t = THREE.MathUtils.clamp(elapsed / modelIntroState.tilt.duration, 0, 1)
+    const eased = easeInOutCubic(t)
+    currentModel.rotation.x = modelIntroState.tilt.from + (modelIntroState.tilt.to - modelIntroState.tilt.from) * eased
+    if (t >= 1) {
+      modelIntroState.tilt.active = false
+      currentModel.rotation.x = modelIntroState.tilt.to
     }
   }
 }
@@ -327,6 +376,71 @@ function onPointerUp(event) {
 function onPointerLeave() {
   isPointerDown = false
   applyRotationSnap()
+}
+
+const actionButtons = document.querySelectorAll('[data-model-action]')
+actionButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    handleModelAction(button.dataset.modelAction)
+  })
+})
+
+// Central place to map UI actions to model movements.
+// Add new buttons by giving them a `data-model-action` and extending the switch below.
+function handleModelAction(action) {
+  if (!currentModel) {
+    console.warn('Model action ignored because no model is loaded yet.')
+    return
+  }
+
+  snapRotationState.active = false
+
+  switch (action) {
+    case 'reset-view': {
+      currentModel.position.set(0, 0, 0)
+      currentModel.rotation.set(0, 0, 0)
+      controls.target.set(0, 0, 0)
+      frameObject(currentModel)
+      break
+    }
+    case 'spin': {
+      startSpin(Math.PI * 2, 2)
+      break
+    }
+    case 'turn-left': {
+      // Rotate left by 90 degrees (quarter turn) with easing
+      startSpin(-Math.PI / 2, 1.25)
+      break
+    }
+    case 'turn-right': {
+      // Rotate right by 90 degrees (quarter turn) with easing
+      startSpin(Math.PI / 2, 1.25)
+      break
+    }
+    case 'tilt-forward': {
+      // Tilt forward by 25 degrees (clamped by configuration)
+      const max = snapRotationSettings.clampDeg
+        ? Math.min(25, snapRotationSettings.clampDeg.max)
+        : 25
+      startTilt(max, 1)
+      break
+    }
+    case 'tilt-back': {
+      // Tilt backward toward the minimum clamp (default -25 deg)
+      const min = snapRotationSettings.clampDeg
+        ? Math.max(-25, snapRotationSettings.clampDeg.min)
+        : -25
+      startTilt(min, 1)
+      break
+    }
+    case 'tilt-neutral': {
+      // Return to upright position (0 degrees)
+      startTilt(0, 0.9)
+      break
+    }
+    default:
+      console.warn(`No handler configured for model action "${action}"`)
+  }
 }
 
 function updateSnapRotation() {
@@ -383,9 +497,8 @@ function frameObject(object3d) {
   const size = box.getSize(new THREE.Vector3()) // Get width, height, depth
   const center = box.getCenter(new THREE.Vector3()) // Get center point
 
-  // Move the model so its center is at the world origin (0, 0, 0)
-  object3d.position.sub(center)
-  controls.target.set(0, 0, 0) // Make camera look at the center
+  // Re-target the camera at the object's center (pivot keeps model near 0,0,0)
+  controls.target.set(0, 0, 0)
 
   // Calculate how far the camera should be to see the whole model
   const maxDim = Math.max(size.x, size.y, size.z) // Largest dimension
@@ -401,7 +514,6 @@ function frameObject(object3d) {
   camera.far = Math.max(distance * 100, 2000) // Don't clip too far
   camera.updateProjectionMatrix() // Apply the changes
   controls.update() // Update orbit controls
-  updateCameraGUI() // Update the GUI sliders
 }
 
 // ============================================================================
@@ -423,26 +535,35 @@ function loadModelFromPublic() {
       // SUCCESS - Model loaded!
       console.log('Model loaded successfully:', gltf)
       
-      // Remove any previous model from the scene
-      const existing = scene.getObjectByName('LoadedModelRoot')
-      if (existing) scene.remove(existing)
+      // Remove any previous model/pivot from the scene
+      const existingPivot = scene.getObjectByName('LoadedModelPivot')
+      if (existingPivot) scene.remove(existingPivot)
+      const existingRoot = scene.getObjectByName('LoadedModelRoot')
+      if (existingRoot) scene.remove(existingRoot)
 
-      // Remove old GUI controls
-      if (modelFolder) {
-        modelFolder.destroy()
-        modelFolder = null
-      }
       currentModel = null
       modelIntroState.fade.active = false
       modelIntroState.fade.materials = []
       modelIntroState.spin.active = false
+      modelIntroState.tilt.active = false
 
       // Get the model from the loaded file
       const root = gltf.scene
       root.name = 'LoadedModelRoot' // Give it a name so we can find it later
       root.scale.setScalar(1) // Start at normal size (scale = 1)
       root.rotation.set(0, 0, 0) // Reset rotation when loading a new model
-      currentModel = root // Store reference so we can rotate it with the pointer
+
+      // Move the mesh so its bounding-box center sits at the origin; the pivot stays at 0,0,0
+      const rootBounds = new THREE.Box3().setFromObject(root)
+      const rootCenter = rootBounds.getCenter(new THREE.Vector3())
+      root.position.sub(rootCenter)
+
+      const pivot = new THREE.Object3D()
+      pivot.name = 'LoadedModelPivot'
+      pivot.add(root)
+      pivot.position.set(0, 0, 0)
+      pivot.rotation.set(0, 0, 0)
+      currentModel = pivot // All interactive rotations operate on this pivot
       
       // Enable shadows on all meshes in the model
       let meshCount = 0
@@ -455,19 +576,17 @@ function loadModelFromPublic() {
       })
       console.log(`Found ${meshCount} meshes in model`)
       
-      // Add model to the scene
-      scene.add(root)
+      // Add pivot + model to the scene
+      scene.add(pivot)
 
       // Center and frame the model in the camera view
-      frameObject(root)
+      frameObject(pivot)
       console.log('Model added to scene and framed')
       
-      // Create the GUI controls for this model
-      setupModelControls(root)
       startModelIntroAnimation(root)
       
       // Update shadow camera to cover the model size
-      const modelBox = new THREE.Box3().setFromObject(root)
+      const modelBox = new THREE.Box3().setFromObject(pivot)
       const modelSize = modelBox.getSize(new THREE.Vector3())
       const maxSize = Math.max(modelSize.x, modelSize.y, modelSize.z)
       const shadowSize = maxSize * 2 // Make shadow area 2x the model size
@@ -509,231 +628,6 @@ function loadModelFromPublic() {
     }
   )
 }
-
-// ============================================================================
-// MODEL CONTROLS - Add controls for the loaded model
-// ============================================================================
-// This function creates the "Model" section in the control panel
-function setupModelControls(root) {
-  if (!root) return // Exit if no model loaded
-
-  // Remove old controls if they exist (when loading a new model)
-  if (modelFolder) {
-    modelFolder.destroy()
-    modelFolder = null
-  }
-
-  // Store the default values for controls
-  const defaults = {
-    scale: root.scale.x || 1, // Current scale (1 = normal size)
-    reset() {
-      // Reset button - puts everything back to default
-      defaults.scale = 1
-      root.scale.setScalar(1) // Set scale back to 1
-      scaleController.updateDisplay() // Update the slider
-      frameObject(root) // Reframe the camera
-    },
-  }
-
-  // Create the "Model" folder in the control panel
-  modelFolder = gui.addFolder('Model')
-  
-  // ADD SCALE CONTROL
-  // .add(object, property, min, max, step)
-  // - object: where the value is stored (defaults.scale)
-  // - property: which property to control ('scale')
-  // - min: minimum value (0.01 = 1% of original size)
-  // - max: maximum value (10 = 1000% of original size)
-  // - step: how much it changes per click (0.01 = 1%)
-  const scaleController = modelFolder
-    .add(defaults, 'scale', 0.01, 10, 0.01)
-    .name('scale') // Label in the GUI
-    .onChange((value) => {
-      // This runs every time the slider changes
-      root.scale.setScalar(value) // Apply the scale to the model
-    })
-  
-  // ADD RESET BUTTON
-  modelFolder.add(defaults, 'reset').name('reset scale')
-  
-  // Open the folder by default (so you can see the controls)
-  modelFolder.open()
-  
-  // ============================================================================
-  // TO ADD MORE MODEL CONTROLS, COPY THE PATTERN ABOVE:
-  // ============================================================================
-  // Example: Add rotation control
-  // defaults.rotationX = 0
-  // modelFolder
-  //   .add(defaults, 'rotationX', 0, Math.PI * 2, 0.01)
-  //   .name('rotate X')
-  //   .onChange((value) => {
-  //     root.rotation.x = value
-  //   })
-  //
-  // Example: Add position control
-  // defaults.positionY = 0
-  // modelFolder
-  //   .add(defaults, 'positionY', -10, 10, 0.1)
-  //   .name('position Y')
-  //   .onChange((value) => {
-  //     root.position.y = value
-  //   })
-  // ============================================================================
-}
-
-// ============================================================================
-// GUI CONTROL PANEL - Creates the control panel on the right side
-// ============================================================================
-// Create the main control panel
-const gui = new GUI({ title: 'Controls' })
-
-// ============================================================================
-// SUN LIGHT CONTROLS - Adjust the sun light position, color, and intensity
-// ============================================================================
-const sunFolder = gui.addFolder('Sun Light')
-const sunParams = {
-  color: '#ffffff', // Default color (white)
-  helper: true, // Show/hide the light helper
-}
-
-// Position controls - where the sun light is located
-// .add(object, property, min, max, step)
-sunFolder.add(sun.position, 'x', -50, 50, 0.1).name('pos x').onChange(() => { 
-  sunHelper.update() // Update the visual helper when position changes
-})
-sunFolder.add(sun.position, 'y', -50, 50, 0.1).name('pos y').onChange(() => { 
-  sunHelper.update() 
-})
-sunFolder.add(sun.position, 'z', -50, 50, 0.1).name('pos z').onChange(() => { 
-  sunHelper.update() 
-})
-
-// Intensity control - how bright the light is (0 = off, 10 = very bright)
-sunFolder.add(sun, 'intensity', 0, 10, 0.1).name('intensity')
-
-// Color picker - change the light color
-sunFolder.addColor(sunParams, 'color').name('color').onChange((v) => { 
-  sun.color.set(v) // Apply the color to the light
-})
-
-// Toggle to show/hide the yellow helper line
-sunFolder.add(sunHelper, 'visible').name('show helper')
-sunFolder.open() // Open the folder by default
-
-// ============================================================================
-// TO ADD MORE SUN CONTROLS:
-// ============================================================================
-// Example: Add shadow quality control
-// sunParams.shadowQuality = 2048
-// sunFolder
-//   .add(sunParams, 'shadowQuality', [1024, 2048, 4096])
-//   .name('shadow quality')
-//   .onChange((value) => {
-//     sun.shadow.mapSize.set(value, value)
-//   })
-// ============================================================================
-
-// ============================================================================
-// CAMERA CONTROLS - Adjust camera position and what it's looking at
-// ============================================================================
-const cameraFolder = gui.addFolder('Camera')
-const cameraControllers = [] // Store all camera controls to update them later
-
-// Store camera values (position and target)
-const cameraParams = {
-  position: {
-    x: camera.position.x, // Camera X position
-    y: camera.position.y, // Camera Y position
-    z: camera.position.z, // Camera Z position
-  },
-  target: {
-    x: controls.target.x, // What the camera looks at (X)
-    y: controls.target.y, // What the camera looks at (Y)
-    z: controls.target.z, // What the camera looks at (Z)
-  },
-  reset() {
-    // Reset button - puts camera back to face-on position
-    const defaultDistance = 5
-    camera.position.set(0, 0, defaultDistance) // Face-on position
-    controls.target.set(0, 0, 0) // Look at center
-    controls.update()
-    updateCameraGUI() // Update the sliders
-  },
-}
-
-// Function to update camera position when slider changes
-function updateCameraPosition() {
-  camera.position.set(
-    cameraParams.position.x,
-    cameraParams.position.y,
-    cameraParams.position.z
-  )
-  controls.update() // Update the orbit controls
-}
-
-// Function to update camera target (what it's looking at) when slider changes
-function updateCameraTarget() {
-  controls.target.set(
-    cameraParams.target.x,
-    cameraParams.target.y,
-    cameraParams.target.z
-  )
-  controls.update()
-}
-
-// Add position controls (where the camera is)
-cameraControllers.push(
-  cameraFolder.add(cameraParams.position, 'x', -200, 200, 0.1).name('pos x').onChange(updateCameraPosition)
-)
-cameraControllers.push(
-  cameraFolder.add(cameraParams.position, 'y', -200, 200, 0.1).name('pos y').onChange(updateCameraPosition)
-)
-cameraControllers.push(
-  cameraFolder.add(cameraParams.position, 'z', -200, 200, 0.1).name('pos z').onChange(updateCameraPosition)
-)
-
-// Add target controls (what the camera looks at)
-cameraControllers.push(
-  cameraFolder.add(cameraParams.target, 'x', -50, 50, 0.1).name('target x').onChange(updateCameraTarget)
-)
-cameraControllers.push(
-  cameraFolder.add(cameraParams.target, 'y', -50, 50, 0.1).name('target y').onChange(updateCameraTarget)
-)
-cameraControllers.push(
-  cameraFolder.add(cameraParams.target, 'z', -50, 50, 0.1).name('target z').onChange(updateCameraTarget)
-)
-
-// Add reset button
-cameraFolder.add(cameraParams, 'reset').name('reset camera')
-cameraFolder.open() // Open the folder by default
-
-// Function to update the GUI sliders when camera moves (from orbit controls)
-updateCameraGUI = () => {
-  // Sync the slider values with actual camera position
-  cameraParams.position.x = camera.position.x
-  cameraParams.position.y = camera.position.y
-  cameraParams.position.z = camera.position.z
-  cameraParams.target.x = controls.target.x
-  cameraParams.target.y = controls.target.y
-  cameraParams.target.z = controls.target.z
-  // Update all the sliders to show current values
-  cameraControllers.forEach((controller) => controller.updateDisplay())
-}
-
-// ============================================================================
-// TO ADD MORE CAMERA CONTROLS:
-// ============================================================================
-// Example: Add field of view control
-// cameraParams.fov = 60
-// cameraFolder
-//   .add(cameraParams, 'fov', 10, 120, 1)
-//   .name('field of view')
-//   .onChange((value) => {
-//     camera.fov = value
-//     camera.updateProjectionMatrix()
-//   })
-// ============================================================================
 
 // Load HDR environment lighting once
 loadEnvironmentMap()
