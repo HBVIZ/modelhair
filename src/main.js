@@ -8,6 +8,29 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js' // Loads .
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js' // Loads HDR environment maps
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 
+console.log('Three.js viewer booting…')
+
+// Allow parent documents (e.g. Webflow hosting this app in an iframe) to queue actions before the viewer is ready.
+const pendingIframeActions = []
+
+window.addEventListener('message', (event) => {
+  const payload = event.data
+  if (!payload || payload.type !== 'model-action') return
+
+  console.log('[iframe] received action request:', payload.action)
+
+  if (typeof window.handleModelAction === 'function') {
+    window.handleModelAction(payload.action)
+  } else {
+    pendingIframeActions.push(payload.action)
+  }
+})
+
+window.addEventListener('load', () => {
+  console.log('Three.js viewer loaded, notifying parent window')
+  window.parent?.postMessage({ type: 'iframe-ready' }, '*')
+})
+
 // ============================================================================
 // SETUP - Basic scene, camera, and renderer
 // ============================================================================
@@ -443,6 +466,13 @@ function handleModelAction(action) {
   }
 }
 
+// Expose the handler globally so host pages (iframes) can call it, and flush any queued actions.
+window.handleModelAction = handleModelAction
+pendingIframeActions.splice(0).forEach((action) => {
+  console.log('[iframe] processing queued action:', action)
+  handleModelAction(action)
+})
+
 function updateSnapRotation() {
   if (!snapRotationState.active || !currentModel) return
 
@@ -465,6 +495,27 @@ function updateSnapRotation() {
     currentModel.rotation[axis] = THREE.MathUtils.clamp(currentModel.rotation[axis], minRad, maxRad)
   }
 }
+
+
+// Listener for button clicks
+
+// Add this to your main.js file in the Three.js app
+// Listen for messages from the parent window (Webflow)
+window.addEventListener('message', function(event) {
+  // Optional: Add origin checking for security
+  // if (event.origin !== 'https://your-webflow-domain.com') return;
+  
+  if (event.data && event.data.type === 'model-action') {
+    const action = event.data.action;
+    console.log('Received model action from parent:', action);
+    handleModelAction(action);
+  }
+});
+
+// Optional: Send a ready message to parent when app is loaded
+window.parent.postMessage({
+  type: 'iframe-ready'
+}, '*');
 
 // ============================================================================
 // ENVIRONMENT MAP - Load HDR background lighting (keeps background transparent)
