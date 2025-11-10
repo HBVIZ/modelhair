@@ -14,15 +14,33 @@
         }
       }
       </script>
-    <script type="module" crossorigin src="/assets/index-idiP3wW3.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-B4jsnN1w.css">
+    <script type="module" crossorigin src="/assets/index-DqUBnAuk.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-_ewCLru7.css">
   </head>
   <body>
     <div id="app"></div>
-      <div style="font-weight:600;margin-bottom:6px">Three.js Viewer</div>
+    <div id="hud" class="ui-card">
+      <div class="ui-title">Three.js Viewer</div>
       <div>Place your GLB in <code>/public/models</code>.</div>
       <div>Open with <code>?model=MyModel.glb</code>.</div>
-      <div style="margin-top:6px">Drag anywhere to rotate the model. Pull past ~25° to snap downward.</div>
+      <div class="ui-note">Drag anywhere to rotate the model. Pull past ~25° to snap downward.</div>
+    </div>
+    <div class="ui-card ui-buttons">
+      <span class="ui-buttons__label">Quick Actions</span>
+      <div class="ui-buttons__group ui-buttons__group--primary">
+        <button type="button" data-model-action="reset-view">Reset View</button>
+        <button type="button" data-model-action="spin">Spin 360°</button>
+      </div>
+      <span class="ui-buttons__label ui-buttons__label--secondary">Directional</span>
+      <div class="ui-buttons__group ui-buttons__group--arrows">
+        <button type="button" data-model-action="tilt-forward" aria-label="Tilt Forward">↑</button>
+        <div class="ui-buttons__group-row">
+          <button type="button" data-model-action="turn-left" aria-label="Turn Left">←</button>
+          <button type="button" data-model-action="tilt-neutral" aria-label="Return Upright">•</button>
+          <button type="button" data-model-action="turn-right" aria-label="Turn Right">→</button>
+        </div>
+        <button type="button" data-model-action="tilt-back" aria-label="Tilt Back">↓</button>
+      </div>
     </div>
   </body>
 </html>
