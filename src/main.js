@@ -91,18 +91,18 @@ hemi.position.set(0, 1, 0) // Position doesn't matter for hemisphere light
 scene.add(hemi)
 
 // Sun light - directional light (like sunlight) with shadows
-const sun = new THREE.DirectionalLight(0xffffff, 3.0)
+const sun = new THREE.DirectionalLight(0xffffff, .0)
 // Parameters: color (white), intensity (3.0 = bright)
-sun.position.set(5, 10, 7) // Position of the light source
+sun.position.set(0, 0, 0) // Position of the light source
 sun.castShadow = true // Enable shadow casting
 sun.shadow.mapSize.set(2048, 2048) // Shadow quality (higher = better but slower)
 sun.shadow.normalBias = 0.02 // Fixes shadow artifacts
 sun.shadow.bias = -0.0005 // Fixes shadow acne
 // Shadow camera bounds - how large an area casts shadows
-sun.shadow.camera.left = -50
-sun.shadow.camera.right = 50
-sun.shadow.camera.top = 50
-sun.shadow.camera.bottom = -50
+sun.shadow.camera.left = -10
+sun.shadow.camera.right = 10
+sun.shadow.camera.top = 10
+sun.shadow.camera.bottom = -10
 sun.shadow.camera.near = 0.1
 sun.shadow.camera.far = 200
 scene.add(sun)
@@ -575,7 +575,7 @@ function frameObject(object3d) {
 function loadModelFromPublic() {
   // Get the model filename from URL, or use default
   const params = new URLSearchParams(window.location.search)
-  const modelFile = params.get('model') || 'airwarp_body_01.glb' // Change this to your default model
+  const modelFile = params.get('model') || '804_A_test_001.glb' // Change this to your default model
 
   console.log('Loading model:', modelFile)
 
